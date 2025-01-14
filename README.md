@@ -30,7 +30,7 @@ This will create three additional databases using default settings, but no names
 
 In Table Partitioning, we distinguish between how you partition your data, and where the partitions are stored. The first bit defines the underlying data structure (global subscripts, see [below](#how-does-it-work)) and is part of your table definition, in other words part of the code. The latter is more a runtime thing, specific to the instance, that may differ depending on where you're deploying your application to.
 
-The _how_ part is specified through a *partitioning key*, which defines a field in the table and a scheme to derive an actual "partition" based on the field's value for every row. The available partition schemes are:
+The _how_ part is specified through a *partition key*, which defines a field in the table and a scheme to derive an actual "partition" based on the field's value for every row. The available partition schemes are:
 * Range partitioning - for example, splitting table data based on a `date_created` field, with each partition corresponding to one month (the _interval_ for the range partition key)
 * List partitioning - for example, splitting table data based on a `region` field, with each partition corresponding to exactly one region
 * Hash partitioning - for example, splitting table data based on a `customer_id` field, with data distributed across a fixed number of partitions based on a hash of the `customer_id` column
@@ -54,18 +54,56 @@ Let's add a few rows to see what this means:
 INSERT INTO demo.log (message) VALUES ('this is today''s first message');
 INSERT INTO demo.log (message) VALUES ('this is today''s second message');
 INSERT INTO demo.log (log_level, message) VALUES ('ERROR', 'this is an error message, sadly');
-INSERT INTO demo.log (log_ts, message) VALUES (DATEADD('month', -2, CURRENT_TIMESTAMP), 'this happened quite a while ago');
-INSERT INTO demo.log (log_ts, log_level, message) VALUES (DATEADD('month', -2, CURRENT_TIMESTAMP), 'ERROR', 'this blew up quite a while ago');
+INSERT INTO demo.log (log_ts, message) VALUES (DATEADD('month', 6, CURRENT_TIMESTAMP), 'a message from the future!');
+INSERT INTO demo.log (log_ts, log_level, message) VALUES (DATEADD('month', 6, CURRENT_TIMESTAMP), 'FATAL', 'it''s the end of the world as we know it');
 ```
 
-We can now consult the catalog to see our partitions, either using the new view in the SMP, or by querying the (INTERNAL) catalog query directly:
+We can now consult the catalog to see our partitions, either using the new view in the SMP, or by querying the catalog query directly:
 
 ```SQL
 SELECT * FROM %SQL_Manager.Partitions('demo','log');
 ```
 
+:information_source: this catalog query is for internal use. A public view in `INFORMATION_SCHEMA` is forthcoming.
+
+This query should return 2 rows, one for the current month and one for those two future records (as per the `DATEADD()` function call), with the location where the partitions are stored. As you'll see, they're still both in the USER database, which is the default for this namespace. This is because thus far, we've only specified _how_ the table data should be partitioned, and not _where_ to map it to. This is achieved through a tool called the *Extent Mapper*.
+
+### The Extent Mapper
+
+The Extent Mapper helps you map partitions to databases other than the default one for a given namespace, and comes with a set of straightforward SQL commands. With the following command, we'll map all data for partitions covering 2023 to the `data-2023` database, and data for partitions earlier than that to the `archive` database:
+```SQL
+ALTER TABLE demo.log MOVE PARTITION BETWEEN '2023-01-01' AND '2023-12-31' TO "data-2023";
+ALTER TABLE demo.log MOVE PARTITION BETWEEN '2000-01-01' AND '2022-12-31' TO "archive";
+```
+
+In the above command, the `BETWEEN` keyword is used to specify a date range, because the partition key for our table is using range partitioning. The values we specified are used to identify the first and last partition to move. Please refer to the documentation for more on the specific syntax for other partition schemes.
+
+When working from the catalog query we used before, you can also specify the partition IDs directly, using individual values or a range (when using range partitioning):
+```SQL
+ALTER TABLE demo.log MOVE PARTITION ID '202401000000' TO "data-2024";
+ALTER TABLE demo.log MOVE PARTITION ID BETWEEN '202401000000' AND '202412000000' TO "data-2024";
+```
+
+If you consult the catalog query we used earlier again, you won't quite see anything, because a partition only exists when there's actual data in it. A separate catalog query exists to show the current mappings themselves:
+```SQL
+SELECT * FROM %SQL_Manager.PartitionMappings('demo','log');
+```
+
+Now let's add some data for these periods, and verify the data went into the right database:
+```SQL
+INSERT INTO demo.log (log_ts, log_level, message) VALUES ('2014-02-27', 'INFO', 'this happened over a decade ago!');
+INSERT INTO demo.log (log_ts, log_level, message) VALUES ('2023-01-01', 'INFO', 'Happy 2023!!');
+INSERT INTO demo.log (log_ts, log_level, message) VALUES ('2024-12-25', 'INFO', 'Merry Christmas!!');
+
+SELECT * FROM %SQL_Manager.Partitions('demo','log');
+```
+You should now see how the records (partitions) ended up in the right database. As we haven't specified a mapping for the 2025 data, those records continue to go into the namespace's default database, though nothing prevents us from specifying a mapping for current or future records upfront.
+
+:warning: Currently, moving nonempty partitions is not supported. This will be available shortly.
 
 ### Under the hood
+
+TBC
 
 
 ## Frequently Asked Questions
