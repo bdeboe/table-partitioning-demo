@@ -1,14 +1,16 @@
 # Table Partitioning Demo
 
-This demo walks you through the new Table Partitioning feature in IRIS SQL. 
+This demo walks you through the new Table Partitioning feature in IRIS SQL, explaining what it does and how it works along the way. We'll only use a few dozen rows to prove the concept, but obviously the capability is focused on datasets several orders of magnitude larger. 
 
 :information_source: Please note that, for now, the new capability is only available with IRIS kits and containers made available through the [Early Access Program](https://www.intersystems.com/early-access-program/).
+
 
 ## What is Table Partitioning?
 
 Table Partitioning helps users manage large tables efficiently by enabling them to split the data across multiple databases based on a logical scheme. This enables, for example, moving older data to a database mounted on a cheaper tier of storage, while keeping the current data that is accessed frequently on premium storage. The data structure for partitioned tables also brings several operational and performance benefits when tables get very large (> 1B rows).
 
 For more about the what and how of Table Partitioning, please check the [Frequenty Asked Questions](#frequently-asked-questions) section at the bottom of this page.
+
 
 ## Getting Started
 
@@ -26,7 +28,7 @@ CREATE DATABASE FILE "archive" ON DIRECTORY '/cheap/archive';  -- change to matc
 
 This will create three additional databases using default settings, but no namespace is mapping anything to them just yet.
 
-### Creating a table
+### Creating a partitioned table
 
 In Table Partitioning, we distinguish between how you partition your data, and where the partitions are stored. The first bit defines the underlying data structure (global subscripts, see [below](#how-does-it-work)) and is part of your table definition, in other words part of the code. The latter is more a runtime thing, specific to the instance, that may differ depending on where you're deploying your application to.
 
@@ -58,7 +60,7 @@ INSERT INTO demo.log (log_ts, message) VALUES (DATEADD('month', 6, CURRENT_TIMES
 INSERT INTO demo.log (log_ts, log_level, message) VALUES (DATEADD('month', 6, CURRENT_TIMESTAMP), 'FATAL', 'it''s the end of the world as we know it');
 ```
 
-We can now consult the catalog to see our partitions, either using the new view in the SMP, or by querying the catalog query directly:
+We can now consult the catalog to see our partitions, either using the new view in the SMP's table details section, or by querying the catalog query directly:
 
 ```SQL
 SELECT * FROM %SQL_Manager.Partitions('demo','log');
@@ -80,8 +82,8 @@ In the above command, the `BETWEEN` keyword is used to specify a date range, bec
 
 When working from the catalog query we used before, you can also specify the partition IDs directly, using individual values or a range (when using range partitioning):
 ```SQL
-ALTER TABLE demo.log MOVE PARTITION ID '202401000000' TO "data-2024";
-ALTER TABLE demo.log MOVE PARTITION ID BETWEEN '202401000000' AND '202412000000' TO "data-2024";
+ALTER TABLE demo.log MOVE PARTITION ID '202411010000' TO "data-2024";
+ALTER TABLE demo.log MOVE PARTITION ID BETWEEN '202401010000' AND '202412010000' TO "data-2024";
 ```
 
 If you consult the catalog query we used earlier again, you won't quite see anything, because a partition only exists when there's actual data in it. A separate catalog query exists to show the current mappings themselves:
@@ -94,16 +96,114 @@ Now let's add some data for these periods, and verify the data went into the rig
 INSERT INTO demo.log (log_ts, log_level, message) VALUES ('2014-02-27', 'INFO', 'this happened over a decade ago!');
 INSERT INTO demo.log (log_ts, log_level, message) VALUES ('2023-01-01', 'INFO', 'Happy 2023!!');
 INSERT INTO demo.log (log_ts, log_level, message) VALUES ('2024-12-25', 'INFO', 'Merry Christmas!!');
+INSERT INTO demo.log (log_ts, log_level, message) VALUES ('2020-04-12', 'INFO', 'Happy Easter!!');
 
 SELECT * FROM %SQL_Manager.Partitions('demo','log');
 ```
 You should now see how the records (partitions) ended up in the right database. As we haven't specified a mapping for the 2025 data, those records continue to go into the namespace's default database, though nothing prevents us from specifying a mapping for current or future records upfront.
 
-:warning: Currently, moving nonempty partitions is not supported. This will be available shortly.
+:warning: Currently, moving nonempty partitions is not supported. This crucial capability will be available shortly.
+
+### Other partition-level operations
+
+In addition to moving partitions using the Extent Mapper, we're also introducing commands to drop entire partitions, including their database mappings:
+```SQL
+ALTER TABLE demo.log DROP PARTITION ID '201402010000';
+ALTER TABLE demo.log DROP PARTITION BETWEEN '2000-01-01' AND '2020-12-31';
+
+SELECT * FROM %SQL_Manager.Partitions('demo','log');
+SELECT * FROM %SQL_Manager.PartitionMappings('demo','log');
+```
+
+:information_source: This command is meant to be used by administrators only, as it skips journaling, locking, triggers, and does not take referential action. 
+
+
+### Querying partitioned tables
+
+WIP
+
 
 ### Under the hood
 
-TBC
+Thus far, we've looked at the SQL surface only. Assuming you're somewhat familiar with how IRIS stores table data in globals, let's look at what happens under the hood. If you think of the word "global" as a type of warming, feel free to skip straight to the [next section](#how-to-convert-existing-data).
+
+#### Table data
+
+By default, IRIS stores table data in a simple global structure with an integer as the subscript representing the row ID, and a `$listbuild` containing column data:
+```ObjectScript
+^demo.log( <row-ID> ) = $lb( <column-1>, <column-2>, ... )
+```
+:information_source: Note that the name of this global in practice will look a little different - we hash the schema and table pieces for certain low-level efficiencies - but that'd only make this example less readable. See the doc on [extent sets](https://docs.intersystems.com/iris20243/csp/documatic/%25CSP.Documatic.cls?LIBRARY=%25SYS&CLASSNAME=%25Library.Persistent#USEEXTENTSET) for more details.
+
+In order to organize data into partitions, and map those partitions to databases using the Extent Mapper, we need to introduce an additional subscript level that encodes the partition field values into a partition ID that is easily mappable. For example, in our range partitioning case, we're simply encoding the date into a straightforward integer format. 
+The following structure would achieve that basic goal:
+```ObjectScript
+^demo.log( <partition-ID>, <row-ID> ) = $lb( <column-1>, <column-2>, ... )
+```
+
+However, in this model individual partitions can still grow arbitrarily large, and pose some of the same issues we're having with large non-partitioned tables today, including lock escalation, unwieldy indices, etc. For these reasons, we're splitting each partition into *buckets* that have a predictable maximum size of about 2 million rows (32*64,000 to be precise). Based on our benchmarks, this bucket size offers a good balance between parallelism opportunities and overhead, and aligns well with our bitmap and columnar data structures.
+Also, we'll switch from a table wide identifier as the last subscript to an integer that's only unique within the partition, ensuring the fastest possible throughput for each partition. This means the row ID becomes a composite ID, combining the partition ID with that integer (we'll call PRowID):
+```ObjectScript
+^demo.log( <partition-ID>, <bucket-ID>, <P-row-ID> ) = $lb( <column-1>, <column-2>, ... )
+```
+If you navigate to the table's maps and indices and then select the master map global, or just consult the global directly, you'll see what this comes down to for our table:
+```ObjectScript
+^DvH1.Ccdz.1	=	""
+^DvH1.Ccdz.1(202301010000)	=	1
+^DvH1.Ccdz.1(202301010000,1,1)	=	$lb(1154594035806846976,"INFO","Happy 2023!!")
+^DvH1.Ccdz.1(202412010000)	=	1
+^DvH1.Ccdz.1(202412010000,1,1)	=	$lb(1154656589406846976,"INFO","Merry Christmas!!")
+^DvH1.Ccdz.1(202501010000)	=	3
+^DvH1.Ccdz.1(202501010000,1,1)	=	$lb(1154658438312846976,"INFO","this is today's first message")
+^DvH1.Ccdz.1(202501010000,1,2)	=	$lb(1154658438313846976,"INFO","this is today's second message")
+^DvH1.Ccdz.1(202501010000,1,3)	=	$lb(1154658438314846976,"ERROR","this is an error message, sadly")
+^DvH1.Ccdz.1(202507010000)	=	2
+^DvH1.Ccdz.1(202507010000,1,1)	=	$lb(1154674076715846976,"INFO","a message from the future!")
+^DvH1.Ccdz.1(202507010000,1,2)	=	$lb(1154674076716846976,"FATAL","it's the end of the world as we know it")
+```
+
+We're only working with a handful of rows, all fitting into a single bucket per partition, but with this structure, we are ready to efficiently manage tables well into the billions if not trillions of rows.
+
+#### Indices
+
+Before we released this feature, some customers have manually mapped ranges of (classic) row IDs to different databases as a form of partitioning (we're not blaming them - they should blame us for not releasing this earlier!). This can help address the most pressing need to split table data, but it does not give you much control over what data actually gets mapped (contrast the randomness of row IDs with per-month partitions) and does not offer a solution for indices because they don't have any predictable subscript structure to base your mappings on at all.
+
+Let's first look at how a simple index on our log table's `log_level` field looks today:
+```ObjectScript
+^demo.log.lvl( <log-level-value>, <row-ID> ) = "" // regular
+^demo.log.lvb( <log-level-value>, <chunk> ) = $bit(...) // bitmap
+```
+
+In the new model, this becomes:
+```ObjectScript
+^demo.log.lvl( <partition-ID>, <bucket-ID>, <log-level-value>, <P-row-ID> ) = "" // regular
+^demo.log.lvb( <partition-ID>, <bucket-ID>, <log-level-value>, <chunk> ) = $bit(...) // bitmap
+```
+
+And for our table's bitmap index in practice:
+```ObjectScript
+^DvH1.Ccdz.3(202301010000,1," INFO",1)	=	/* $bit(2) - PRowIDs: 1 */
+^DvH1.Ccdz.3(202412010000,1," INFO",1)	=	/* $bit(2) - PRowIDs: 1  */
+^DvH1.Ccdz.3(202501010000,1," ERROR",1)	=	/* $bit(4) - PRowIDs: 3  */
+^DvH1.Ccdz.3(202501010000,1," INFO",1)	=	/* $bit(2,3) - PRowIDs: 1,2  */
+^DvH1.Ccdz.3(202507010000,1," FATAL",1)	=	/* $bit(3) - PRowIDs: 2  */
+^DvH1.Ccdz.3(202507010000,1," INFO",1)	=	/* $bit(2) - PRowIDs: 1  */
+```
+
+You may have noticed that, for simple index lookups such as to enforce uniqueness, the above structure requires looping through all partitions and buckets. This is indeed a price we pay for the scalability we gain, and one we're mitigating through appropriate use of parallelism. Obviously, when your index or uniqueness constraint also includes the partition key fields, that overhead no longer applies.
+
+
+### How to convert existing data?
+
+See also [this question](#can-i-convert-my-existing-tables-to-use-partitioning) in the FAQ section.
+
+
+### Cleaning up
+
+A simple `DROP TABLE` command will automatically remove any database mappings created through the Extent Mapper, so the following is all we have to do to clean up our table:
+```SQL
+DROP TABLE demo.log;
+```
 
 
 ## Frequently Asked Questions
