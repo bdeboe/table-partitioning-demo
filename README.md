@@ -60,13 +60,11 @@ INSERT INTO demo.log (log_ts, message) VALUES (DATEADD('month', 6, CURRENT_TIMES
 INSERT INTO demo.log (log_ts, log_level, message) VALUES (DATEADD('month', 6, CURRENT_TIMESTAMP), 'FATAL', 'it''s the end of the world as we know it');
 ```
 
-We can now consult the catalog to see our partitions, either using the new view in the SMP's table details section, or by querying the catalog query directly:
+We can now consult the catalog to see our partitions, either using the new view in the SMP's table details section, or by querying the catalog directly:
 
 ```SQL
-SELECT * FROM %SQL_Manager.Partitions('demo','log');
+SELECT * FROM INFORMATION_SCHEMA.TABLE_PARTITIONS;
 ```
-
-:information_source: this catalog query is for internal use. A public view in `INFORMATION_SCHEMA` is forthcoming.
 
 This query should return 2 rows, one for the current month and one for those two future records (as per the `DATEADD()` function call), with the location where the partitions are stored. As you'll see, they're still both in the USER database, which is the default for this namespace. This is because thus far, we've only specified _how_ the table data should be partitioned, and not _where_ to map it to. This is achieved through a tool called the *Extent Mapper*.
 
@@ -80,15 +78,15 @@ ALTER TABLE demo.log MOVE PARTITION BETWEEN '2000-01-01' AND '2022-12-31' TO "ar
 
 In the above command, the `BETWEEN` keyword is used to specify a date range, because the partition key for our table is using range partitioning. The values we specified are used to identify the first and last partition to move. Please refer to the documentation for more on the specific syntax for other partition schemes.
 
-When working from the catalog query we used before, you can also specify the partition IDs directly, using individual values or a range (when using range partitioning):
+When working from the catalog info we used before, you can also specify the partition IDs directly, using individual values or a range (when using range partitioning):
 ```SQL
 ALTER TABLE demo.log MOVE PARTITION ID '202411010000' TO "data-2024";
 ALTER TABLE demo.log MOVE PARTITION ID BETWEEN '202401010000' AND '202412010000' TO "data-2024";
 ```
 
-If you consult the catalog query we used earlier again, you won't quite see anything, because a partition only exists when there's actual data in it. A separate catalog query exists to show the current mappings themselves:
+If you consult the catalog table we used earlier again, you won't quite see anything different, because a partition only exists when there's actual data in it. A separate catalog table exists to show the current mappings themselves:
 ```SQL
-SELECT * FROM %SQL_Manager.PartitionMappings('demo','log');
+SELECT * FROM INFORMATION_SCHEMA.TABLE_PARTITION_MAPPINGS;
 ```
 
 Now let's add some data for these periods, and verify the data went into the right database:
@@ -98,7 +96,7 @@ INSERT INTO demo.log (log_ts, log_level, message) VALUES ('2023-01-01', 'INFO', 
 INSERT INTO demo.log (log_ts, log_level, message) VALUES ('2024-12-25', 'INFO', 'Merry Christmas!!');
 INSERT INTO demo.log (log_ts, log_level, message) VALUES ('2020-04-12', 'INFO', 'Happy Easter!!');
 
-SELECT * FROM %SQL_Manager.Partitions('demo','log');
+SELECT * FROM INFORMATION_SCHEMA.TABLE_PARTITIONS;
 ```
 You should now see how the records (partitions) ended up in the right database. As we haven't specified a mapping for the 2025 data, those records continue to go into the namespace's default database, though nothing prevents us from specifying a mapping for current or future records upfront.
 
@@ -111,8 +109,8 @@ In addition to moving partitions using the Extent Mapper, we're also introducing
 ALTER TABLE demo.log DROP PARTITION ID '201402010000';
 ALTER TABLE demo.log DROP PARTITION BETWEEN '2000-01-01' AND '2020-12-31';
 
-SELECT * FROM %SQL_Manager.Partitions('demo','log');
-SELECT * FROM %SQL_Manager.PartitionMappings('demo','log');
+SELECT * FROM INFORMATION_SCHEMA.TABLE_PARTITIONS;
+SELECT * FROM INFORMATION_SCHEMA.TABLE_PARTITION_MAPPINGS;
 ```
 
 :information_source: This command is meant to be used by administrators only, as it skips journaling, locking, triggers, and does not take referential action. 
