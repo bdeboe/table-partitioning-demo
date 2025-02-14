@@ -118,7 +118,9 @@ SELECT * FROM INFORMATION_SCHEMA.TABLE_PARTITION_MAPPINGS;
 
 ### Querying partitioned tables
 
-WIP
+You can query partitioned tables just like any other table. When a filter predicate in the `WHERE` clause of a query concerns a partition key field, IRIS SQL will verify whether it can be used to limit the number of partitions to look into to build the query result set. This is called _partition pruning_ and will typically result in an additional range condition or parallelization level in the query plan.
+
+:warning: Work on the partition pruning capability is currently ongoing and will be available in a forthcoming release.
 
 
 ### Under the hood
