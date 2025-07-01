@@ -1,8 +1,8 @@
 # Table Partitioning Demo
 
-This demo walks you through the new Table Partitioning feature in IRIS SQL, explaining what it does and how it works along the way. We'll only use a few dozen rows to prove the concept, but obviously the capability is focused on datasets several orders of magnitude larger. 
+This demo walks you through the new Table Partitioning feature in IRIS SQL, explaining what it does and how it works along the way. We'll only use a few dozen rows to prove the concept, but obviously the capability is focused on datasets many orders of magnitude larger. 
 
-:information_source: Please note that, for now, the new capability is only available with IRIS kits and containers made available through the [Early Access Program](https://www.intersystems.com/early-access-program/).
+:information_source: While a first experimental version of the new capability is now available with IRIS 2025.2, we recommend users download the more recent kits and containers made available through the [Early Access Program](https://www.intersystems.com/early-access-program/) to explore this new capability. For more about what's new in the current version, see [below](#version-history)
 
 
 ## What is Table Partitioning?
@@ -41,23 +41,23 @@ Composite partition keys are also supported, in which case you can choose a part
 As a first example, we'll create a simple transaction log table that is partitioned by date:
 ```SQL
 CREATE TABLE demo.log (
-    log_ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     log_level VARCHAR(10) DEFAULT 'INFO',
     message VARCHAR(1000)
-) PARTITION BY RANGE (log_ts) INTERVAL 1 MONTH;
+) PARTITION BY RANGE (ts) INTERVAL 1 MONTH;
 
 CREATE BITMAP INDEX levelBIdx ON demo.log(log_level);
 ```
 
-That's it! We have now created our first partitioned table, and any data we'll write to the table will automatically be structured into a partition for the month represented by `log_ts`. 
+That's it! We have now created our first partitioned table, and any data we'll write to the table will automatically be structured into a partition for the month represented by `ts`. 
 Let's add a few rows to see what this means:
 
 ```SQL
 INSERT INTO demo.log (message) VALUES ('this is today''s first message');
 INSERT INTO demo.log (message) VALUES ('this is today''s second message');
 INSERT INTO demo.log (log_level, message) VALUES ('ERROR', 'this is an error message, sadly');
-INSERT INTO demo.log (log_ts, message) VALUES (DATEADD('month', 6, CURRENT_TIMESTAMP), 'a message from the future!');
-INSERT INTO demo.log (log_ts, log_level, message) VALUES (DATEADD('month', 6, CURRENT_TIMESTAMP), 'FATAL', 'it''s the end of the world as we know it');
+INSERT INTO demo.log (ts, message) VALUES (DATEADD('month', 6, CURRENT_TIMESTAMP), 'a message from the future!');
+INSERT INTO demo.log (ts, log_level, message) VALUES (DATEADD('month', 6, CURRENT_TIMESTAMP), 'FATAL', 'it''s the end of the world as we know it');
 ```
 
 We can now consult the catalog to see our partitions, either using the new view in the SMP's table details section, or by querying the catalog directly:
@@ -91,10 +91,10 @@ SELECT * FROM INFORMATION_SCHEMA.TABLE_PARTITION_MAPPINGS;
 
 Now let's add some data for these periods, and verify the data went into the right database:
 ```SQL
-INSERT INTO demo.log (log_ts, log_level, message) VALUES ('2014-02-27', 'INFO', 'this happened over a decade ago!');
-INSERT INTO demo.log (log_ts, log_level, message) VALUES ('2023-01-01', 'INFO', 'Happy 2023!!');
-INSERT INTO demo.log (log_ts, log_level, message) VALUES ('2024-12-25', 'INFO', 'Merry Christmas!!');
-INSERT INTO demo.log (log_ts, log_level, message) VALUES ('2020-04-12', 'INFO', 'Happy Easter!!');
+INSERT INTO demo.log (ts, log_level, message) VALUES ('2014-02-27', 'INFO', 'this happened over a decade ago!');
+INSERT INTO demo.log (ts, log_level, message) VALUES ('2023-01-01', 'INFO', 'Happy 2023!!');
+INSERT INTO demo.log (ts, log_level, message) VALUES ('2024-12-25', 'INFO', 'Merry Christmas!!');
+INSERT INTO demo.log (ts, log_level, message) VALUES ('2020-04-12', 'INFO', 'Happy Easter!!');
 
 SELECT * FROM INFORMATION_SCHEMA.TABLE_PARTITIONS;
 ```
@@ -120,7 +120,33 @@ SELECT * FROM INFORMATION_SCHEMA.TABLE_PARTITION_MAPPINGS;
 
 You can query partitioned tables just like any other table. When a filter predicate in the `WHERE` clause of a query concerns a partition key field, IRIS SQL will verify whether it can be used to limit the number of partitions to look into to build the query result set. This is called _partition pruning_ and will typically result in an additional range condition or parallelization level in the query plan.
 
-:warning: Work on the partition pruning capability is currently ongoing and will be available in a forthcoming release.
+Let's see how this looks with an example. Use the "Show Plan" button in the SMP or the `EXPLAIN` command in your shell or JDBC tool to check the query plan for the following query:
+
+```SQL
+SELECT * FROM demo.log WHERE ts BETWEEN '2024-01-01 00:00:00' AND '2024-12-31 23:59:59';
+```
+
+You should see something like this:
+
+![Query plan](/img/query-plan-1.png)
+
+Note the following line in the outermost loop: TODO
+
+We have translated the range condition on our `ts` field from the query into a range condition on the master map's subscript structure (more about that [later](#under-the-hood)). This may not look like much at first as you'd see this all the time for conditions on indexed fields. What's different is that this time we haven't defined an index on `ts` at all. We're just exploiting the partitioned structure of the master map to turn this full table scan into a full scan of a much smaller set of partitions, excluding the ones that certainly don't contain data matching our `ts` condition. If your older 
+
+Let's look at another query:
+
+```SQL
+SELECT COUNT(*) FROM demo.log WHERE ts BETWEEN '2024-01-01 00:00:00' AND '2024-12-31 23:59:59' AND log_level IN ('FATAL', 'ERROR');
+```
+
+and it's query plan:
+
+![Query plan](/img/query-plan-2.png)
+
+What's new here is that it's leveraging the same partition pruning trick we used for the master map in the previous example, but now for its use of the index on `log_level`. This is because we apply the same partitioned structure to indices, which of course is necessary in order to support mapping index data along with row data as described earlier. 
+
+:information_source: Index partitioning is now also available for the Approximate Nearest Neighbour index used for [Vector Search](https://docs.intersystems.com/irislatest/csp/docbook/DocBook.UI.Page.cls?KEY=GSQL_vectorsearch). In that index, we build a complex graph based on the vector data, and search performance decreases as the graph gets large. Thanks to the bucketed nature of partitioned tables, there's a maximum size to this graph and we can efficiently search through buckets in parallel. 
 
 
 ### Under the hood
@@ -208,7 +234,7 @@ Class demo.log Extends %Persistent
 Property "%%BUCKETID" As %Library.BigInt [ Private, SqlComputeCode = {set {*}={x__prowid}\2048000+1}, SqlComputed, SqlFieldName = x__bucketid ];
 
 /// Partition Id 1 property, auto-generated for partitioned class
-Property "%%PARTITIONID1" As %Library.Integer [ Private, SqlComputeCode = {set {*}=$$partitionIdFromDateTime^%occPartition({log_ts},"%Library.PosixTime",1,"MONTH")}, SqlComputed, SqlFieldName = x__partitionid1 ];
+Property "%%PARTITIONID1" As %Library.Integer [ Private, SqlComputeCode = {set {*}=$$partitionIdFromDateTime^%occPartition({ts},"%Library.PosixTime",1,"MONTH")}, SqlComputed, SqlFieldName = x__partitionid1 ];
 
 /// Partition-RowId property, auto-generated for partitioned class
 Property "%%PROWID" As %Library.BigInt [ Private, SqlComputeCode = {set {*}=$sequence(^DvH1.Ccdz.1({x__partitionid1}))}, SqlComputed, SqlFieldName = x__prowid ];
@@ -296,6 +322,19 @@ Table Partitioning is fully orthogonal to columnar storage, and we expect custom
 ### How about our other data models?
 
 The feature is currently called _Table_ Partitioning, but we may expand the principle to other data models in the future, where there's a need to logically organize data across multiple databases.
+
+## Version History
+
+The following versions have been published through the EAP
+
+* 2025.2.0TBLP.111
+  * Initial filer and query support
+  * Support for mapping empty partitions
+
+* 2025.3.0TBLP.101
+  * Initial version of partition pruning
+  * Partitioned ANN index
+  * Various bugfixes and smaller enhancements
 
 ## How to get help?
 
