@@ -274,15 +274,61 @@ Index PartitionKey On logts(range(1 month) [ Abstract, SqlName = "%%PartitionKey
 
 
 ### How to convert existing data?
-
-See also [this question](#can-i-convert-my-existing-tables-to-use-partitioning) in the FAQ section.
+ 
+In the latest EAP kit (uploaded Dec 16 2025), we now have the ability to partition a table that is not already partitioned. Similarly, we have the ability to de-partition a table that is partitioned. Let's start by essentially recreating our demo.log table, but this time without the PARTITION BY clause
+ 
+```SQL
+CREATE TABLE demo.log2NotPart (
+    ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    log_level VARCHAR(10) DEFAULT 'INFO',
+    message VARCHAR(1000)
+);
+```
+ 
+And let's insert our same data into this table
+ 
+```SQL
+INSERT INTO demo.log2NotPart (log_level, message) VALUES ('ERROR', 'this is an error message, sadly');
+INSERT INTO demo.log2NotPart (ts, message) VALUES (DATEADD('month', 6, CURRENT_TIMESTAMP), 'a message from the future!');
+INSERT INTO demo.log2NotPart (ts, log_level, message) VALUES (DATEADD('month', 6, CURRENT_TIMESTAMP), 'FATAL', 'it''s the end of the world as we know it');
+INSERT INTO demo.log2NotPart (ts, log_level, message) VALUES ('2024-08-12', 'INFO', 'Enjoy the Perseid meteor shower!');
+INSERT INTO demo.log2NotPart (ts, log_level, message) VALUES ('2014-02-27', 'INFO', 'this happened over a decade ago!');
+INSERT INTO demo.log2NotPart (ts, log_level, message) VALUES ('2023-01-01', 'INFO', 'Happy 2023!!');
+INSERT INTO demo.log2NotPart (ts, log_level, message) VALUES ('2024-12-25', 'INFO', 'Merry Christmas!!');
+INSERT INTO demo.log2NotPart (ts, log_level, message) VALUES ('2020-04-12', 'INFO', 'Happy Easter!!');
+```
+ 
+If we check our handy catalog table, we'll see that there is no mention of demo.log2NotPart. This is expected, since the table is not partitioned.
+ 
+```SQL
+SELECT * FROM INFORMATION_SCHEMA.TABLE_PARTITIONS;
+```
+ 
+Now let's use our CONVERT PARTITION command to partition our new table
+ 
+```SQL
+ALTER TABLE demo.log2NotPart CONVERT PARTITION BY RANGE (ts) INTERVAL 1 MONTH
+```
+ 
+When we re-query our catalog table, we should now see seven PARTITION_ID entries for demo.log2NotPart
+ 
+ 
+We can also de-partition the table by using the CONVERT PARTITION OFF command
+```SQL
+ALTER TABLE demo.log2NotPart CONVERT PARTITION OFF
+```
+ 
+Once again, when we re-query our catalog table, we should once again see only the partitions for demo.log.
+ 
+There is a bit more nuance to partition conversion than we demonstrated here. If you're trying out this feature, refer to [this question](#can-i-convert-my-existing-tables-to-use-partitioning) in the FAQ section. 
 
 
 ### Cleaning up
 
 A simple `DROP TABLE` command will automatically remove any database mappings created through the Extent Mapper, so the following is all we have to do to clean up our table:
 ```SQL
-DROP TABLE demo.log;
+DROP TABLE IF EXISTS demo.log;
+DROP TABLE IF EXISTS demo.log2NotPart;
 ```
 
 
