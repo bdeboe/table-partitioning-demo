@@ -2,7 +2,7 @@
 
 This demo walks you through the new Table Partitioning feature in IRIS SQL, explaining what it does and how it works along the way. We'll only use a few dozen rows to prove the concept, but obviously the capability is focused on datasets many orders of magnitude larger. 
 
-:information_source: While a first experimental version of the new capability is now available with IRIS 2025.2, we recommend users download the more recent kits and containers made available through the [Early Access Program](https://www.intersystems.com/early-access-program/) to explore this new capability. For more about what's new in the current version, see [below](#version-history)
+:information_source: While an experimental version of the new capability was first made available with IRIS 2025.2, we recommend users download the more recent kits and containers made available through the [Early Access Program](https://www.intersystems.com/early-access-program/) to explore this new capability. For more about what's new in the current version, see [below](#version-history)
 
 
 ## What is Table Partitioning?
@@ -16,6 +16,11 @@ For more about the what and how of Table Partitioning, please check the [Frequen
 
 You can download a kit or container image in the Table Partitioning EAP section of the [Evaluation Portal](https://evaluation.intersystems.com/), and install or start it just like any other IRIS instance. Once installed, you can use your favourite SQL interface (DBeaver, the Shell, or the SMP) to run the commands described in this tutorial.
 
+### Creating the test namespace
+
+I like to begin by creating a test namespace and database that we can use for our demo. I named mine TESTTP1. If you're feeling lazy, you can just use the built-in USER namespace for this demo; it will work just as well.
+>    Home > Menu > Configure Namespaces > Create New Namespace
+
 ### Creating databases
 
 The main goal of Table Partitioning is to enable administrators to split table data across multiple databases to simplify operations, so we'll want to create a few databases first. For this purpose, we'll use a new flavour of the existing `CREATE DATABASE` command - which would create an entire _namespace_ - to just create the local database:
@@ -23,14 +28,14 @@ The main goal of Table Partitioning is to enable administrators to split table d
 ```SQL
 CREATE DATABASE FILE "data-2024";
 CREATE DATABASE FILE "data-2023";
-CREATE DATABASE FILE "archive" ON DIRECTORY '/cheap/archive';  -- change to match your setup
+CREATE DATABASE FILE "archive" ON DIRECTORY '{install dir}/mgr/cheap/archive/';  -- change to match your setup
 ```
 
 This will create three additional databases using default settings, but no namespace is mapping anything to them just yet.
 
 ### Creating a partitioned table
 
-In Table Partitioning, we distinguish between how you partition your data, and where the partitions are stored. The first bit defines the underlying data structure (global subscripts, see [below](#how-does-it-work)) and is part of your table definition, in other words part of the code. The latter is more a runtime thing, specific to the instance, that may differ depending on where you're deploying your application to.
+In Table Partitioning, we distinguish between _how_ you partition your data and _where_ the partitions are stored. The first bit defines the underlying data structure (global subscripts, see [below](#how-does-it-work)) and is part of your table definition -- in other words, part of the code. The latter is more a runtime thing, specific to the instance, that may differ depending on where you're deploying your application to.
 
 The _how_ part is specified through a *partition key*, which defines a field in the table and a scheme to derive an actual "partition" based on the field's value for every row. The available partition schemes are:
 * Range partitioning - for example, splitting table data based on a `date_created` field, with each partition corresponding to one month (the _interval_ for the range partition key)
@@ -58,6 +63,7 @@ INSERT INTO demo.log (message) VALUES ('this is today''s second message');
 INSERT INTO demo.log (log_level, message) VALUES ('ERROR', 'this is an error message, sadly');
 INSERT INTO demo.log (ts, message) VALUES (DATEADD('month', 6, CURRENT_TIMESTAMP), 'a message from the future!');
 INSERT INTO demo.log (ts, log_level, message) VALUES (DATEADD('month', 6, CURRENT_TIMESTAMP), 'FATAL', 'it''s the end of the world as we know it');
+INSERT INTO demo.log (ts, log_level, message) VALUES ('2024-08-12', 'INFO', 'Enjoy the Perseid meteor shower!');
 ```
 
 We can now consult the catalog to see our partitions, either using the new view in the SMP's table details section, or by querying the catalog directly:
@@ -66,11 +72,14 @@ We can now consult the catalog to see our partitions, either using the new view 
 SELECT * FROM INFORMATION_SCHEMA.TABLE_PARTITIONS;
 ```
 
-This query should return 2 rows, one for the current month and one for those two future records (as per the `DATEADD()` function call), with the location where the partitions are stored. As you'll see, they're still both in the USER database, which is the default for this namespace. This is because thus far, we've only specified _how_ the table data should be partitioned, and not _where_ to map it to. This is achieved through a tool called the *Extent Mapper*.
+This query should return 3 rows -- one for the current month, one for those two future records (as per the `DATEADD()` function call), and one of the past record from August 2024 -- with the location where the partitions are stored. As you'll see, they're all located in the TESTTP1 database, which is the default for the TESTTP1 namespace. This is because thus far, we've only specified _how_ the table data should be partitioned, and not _where_ to map it to. The _where_ is achieved through a tool called the *Extent Mapper*.
 
 ### The Extent Mapper
 
-The Extent Mapper helps you map partitions to databases other than the default one for a given namespace, and comes with a set of straightforward SQL commands. With the following command, we'll map all data for partitions covering 2023 to the `data-2023` database, and data for partitions earlier than that to the `archive` database:
+:information_source: _Before we can successfully run the MOVE PARTITION commands below, we'll need to go to Jouranl Settings and make sure that "Journal freeze on error" is enabled._ 
+>    Home > System Administation > Configuration > System Configuration > Journal Settings
+
+The Extent Mapper helps you map partitions to databases other than the default one for a given namespace. It comes with a set of straightforward SQL commands. With the following command, we'll map all data for partitions covering 2023 to the `data-2023` database, and data for partitions earlier than that to the `archive` database:
 ```SQL
 ALTER TABLE demo.log MOVE PARTITION BETWEEN '2023-01-01' AND '2023-12-31' TO "data-2023";
 ALTER TABLE demo.log MOVE PARTITION BETWEEN '2000-01-01' AND '2022-12-31' TO "archive";
@@ -84,7 +93,13 @@ ALTER TABLE demo.log MOVE PARTITION ID '202411010000' TO "data-2024";
 ALTER TABLE demo.log MOVE PARTITION ID BETWEEN '202401010000' AND '202412010000' TO "data-2024";
 ```
 
-If you consult the catalog table we used earlier again, you won't quite see anything different, because a partition only exists when there's actual data in it. A separate catalog table exists to show the current mappings themselves:
+If you consult the catalog table we used earlier again, you'll notice one important change. The entry with PARTITION_ID = 202408010000 now shows LOCATION = DATA-2024
+```SQL
+SELECT * FROM INFORMATION_SCHEMA.TABLE_PARTITIONS;
+```
+This demonstrates the "move" part of MOVE PARTITION. The command first maps the partitions to your desired databases, and then it physically moves any relevant data from the source database to the target database. 
+
+However, you'll also notice that the catalog table does not show any information for the DATA-2023 database or the ARCHIVE database. This is because a partition only exists when there's actual data in it. A separate catalog table exists to show the current mappings themselves:
 ```SQL
 SELECT * FROM INFORMATION_SCHEMA.TABLE_PARTITION_MAPPINGS;
 ```
@@ -98,22 +113,24 @@ INSERT INTO demo.log (ts, log_level, message) VALUES ('2020-04-12', 'INFO', 'Hap
 
 SELECT * FROM INFORMATION_SCHEMA.TABLE_PARTITIONS;
 ```
-You should now see how the records (partitions) ended up in the right database. As we haven't specified a mapping for the 2025 data, those records continue to go into the namespace's default database, though nothing prevents us from specifying a mapping for current or future records upfront.
-
-:warning: Currently, moving nonempty partitions is not supported. This crucial capability will be available shortly.
+You should now see how the records (partitions) ended up in the right database. As we haven't specified a mapping for the 2025 and 2026 data, those records continue to go into the namespace's default database, though nothing prevents us from specifying a mapping for current or future records upfront.
 
 ### Other partition-level operations
 
 In addition to moving partitions using the Extent Mapper, we're also introducing commands to drop entire partitions, including their database mappings:
 ```SQL
 ALTER TABLE demo.log DROP PARTITION ID '201402010000';
+  -- the 2014 entry "this happened over a decade ago!" is now gone
 ALTER TABLE demo.log DROP PARTITION BETWEEN '2000-01-01' AND '2020-12-31';
+  -- the 2020 entry "Happy Easter!!" is now gone
 
 SELECT * FROM INFORMATION_SCHEMA.TABLE_PARTITIONS;
+  -- the two ARCHIVE entries (PARTITION_IDs = 201402010000 and 202004010000) are now gone
 SELECT * FROM INFORMATION_SCHEMA.TABLE_PARTITION_MAPPINGS;
+  -- but the mapping for the ARCHIVE is still there
 ```
 
-:information_source: This command is meant to be used by administrators only, as it skips journaling, locking, triggers, and does not take referential action. 
+:information_source: This DROP PARTITION command is meant to be used by administrators only, as it skips journaling, locking, triggers, and does not take referential action. 
 
 
 ### Querying partitioned tables
@@ -130,9 +147,7 @@ You should see something like this:
 
 ![Query plan](/img/query-plan-1.png)
 
-Note the following line in the outermost loop: TODO
-
-We have translated the range condition on our `ts` field from the query into a range condition on the master map's subscript structure (more about that [later](#under-the-hood)). This may not look like much at first as you'd see this all the time for conditions on indexed fields. What's different is that this time we haven't defined an index on `ts` at all. We're just exploiting the partitioned structure of the master map to turn this full table scan into a full scan of a much smaller set of partitions, excluding the ones that certainly don't contain data matching our `ts` condition. If your older 
+We have translated the range condition on our `ts` field from the query into a range condition on the master map's subscript structure (more about that [later](#under-the-hood)). This may not look like much at first as you'd see this all the time for conditions on indexed fields. What's different is that this time we haven't defined an index on `ts` at all. We're just exploiting the partitioned structure of the master map to turn this full table scan into a full scan of a much smaller set of partitions, excluding the ones that certainly don't contain data matching our `ts` condition.
 
 Let's look at another query:
 
@@ -218,6 +233,11 @@ And for our table's bitmap index in practice:
 
 You may have noticed that, for simple index lookups such as to enforce uniqueness, the above structure requires looping through all partitions and buckets. This is indeed a price we pay for the scalability we gain, and one we're mitigating through appropriate use of parallelism. Obviously, when your index or uniqueness constraint also includes the partition key fields, that overhead no longer applies.
 
+#### The namespace mappings
+
+Earlier, we talked about how MOVE PARTITION first maps the partitions to your desired databases. You can see these mappings yourself in the Global Mappings page. You should see the globals split acording to their partition subscripts, with each split assigned to the appropriate database.
+>    Home > Menu > Configure Namespaces > Global Mappings (for the TESTTP1 row)
+
 #### The class definition
 
 While we're presenting this new capability from the SQL perspective, the partition key and other elements relevant to the partitioning configuration can all be expressed through UDL. 
@@ -278,7 +298,7 @@ The Table Partitioning capability described here will start off as a platform fe
 
 ### When will this feature be available with InterSystems IRIS?
 
-You can try the new capability through the [Early Access Program](https://www.intersystems.com/early-access-program/) now, and we hope to include it in an IRIS release later in 2025.
+You can try the new capability through the [Early Access Program](https://www.intersystems.com/early-access-program/) now, and we hope to include it in an IRIS release early in 2026.
 
 ### How does it work?
 
@@ -333,6 +353,11 @@ The following versions have been published through the EAP
 
 * 2025.3.0TBLP.101
   * Initial version of partition pruning
+  * Partitioned ANN index
+  * Various bugfixes and smaller enhancements
+
+* 2026.1.0TBLP.111
+  * MOVE PARTITION now supporting non-empty partitions
   * Partitioned ANN index
   * Various bugfixes and smaller enhancements
 
