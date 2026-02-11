@@ -2,7 +2,10 @@
 
 This demo walks you through the new Table Partitioning feature in IRIS SQL, explaining what it does and how it works along the way. We'll only use a few dozen rows to prove the concept, but obviously the capability is focused on datasets many orders of magnitude larger. 
 
-:information_source: While an experimental version of the new capability was first made available with IRIS 2025.2, we recommend users download the more recent kits and containers made available through the [Early Access Program](https://www.intersystems.com/early-access-program/) to explore this new capability. For more about what's new in the current version, see [below](#version-history)
+<!--
+:information_source: While an experimental version of the new capability was first made available with IRIS 2025.2, we recommend users download the more recent kits and containers made available through the [Early Access Program](https://www.intersystems.com/early-access-program/) to explore this new capability. For more about what's new in the current version, see [below](#version-history) 
+-->
+:information_source: While some Table Partitioning features were first made available with IRIS 2025.2, we recommend users download the more recent kits and containers made available through the [IRIS 2026.1 Developer Preview](https://community.intersystems.com/post/third-intersystems-iris-intersystems-iris-health-and-healthshare-health-connect-20261-developer) to explore this new capability. For more about what's new in the current version, see [below](#version-history) 
 
 
 ## What is Table Partitioning?
@@ -13,8 +16,10 @@ For more about the what and how of Table Partitioning, please check the [Frequen
 
 
 ## Getting Started
-
+<!--
 You can download a kit or container image in the Table Partitioning EAP section of the [Evaluation Portal](https://evaluation.intersystems.com/), and install or start it just like any other IRIS instance. Once installed, you can use your favourite SQL interface (DBeaver, the Shell, or the SMP) to run the commands described in this tutorial.
+-->
+The latest version of Table Partitioning is available in the [IRIS 2026.1 Developer Preview](https://community.intersystems.com/post/third-intersystems-iris-intersystems-iris-health-and-healthshare-health-connect-20261-developer). You can download a kit or container image from that page, and you can install or start it just like any other IRIS instance. Once installed, you can use your favourite SQL interface (DBeaver, the Shell, or the SMP) to run the commands described in this tutorial.
 
 ### Creating the test namespace
 
@@ -275,7 +280,7 @@ Index PartitionKey On logts(range(1 month) [ Abstract, SqlName = "%%PartitionKey
 
 ### How to convert existing data?
  
-In the latest EAP kit (uploaded Dec 16 2025), we now have the ability to partition a table that is not already partitioned. Similarly, we have the ability to de-partition a table that is partitioned. Let's start by essentially recreating our demo.log table, but this time without the PARTITION BY clause
+As of the December 2025 pre-release kits, we now have the ability to partition a table that is not already partitioned. Similarly, we have the ability to de-partition a table that is partitioned. Let's start by essentially recreating our demo.log table, but this time without the PARTITION BY clause
  
 ```SQL
 CREATE TABLE demo.log2NotPart (
@@ -356,7 +361,7 @@ To some extent, yes. In fact, Table Partitioning relies on subscript-level mappi
 
 ### Can I convert my existing tables to use partitioning?
 
-Yes, we're including `ALTER TABLE .. CONVERT ..` syntax to allow transforming an existing table into a partitioned table and vice versa. This command is not part of the initial release though. Also note that some conversions imply a change to the RowID and may require updates to tables with a foreign key constraint pointing to the table being converted.
+Yes, we're including `ALTER TABLE .. CONVERT ..` syntax to allow [transforming an existing table into a partitioned table](https://github.com/bdeboe/table-partitioning-demo?tab=readme-ov-file#how-to-convert-existing-data) and vice versa. Note that some conversions imply a change to the RowID and may require updates to tables with a foreign key constraint pointing to the table being converted.
 
 ### What other benefits should I expect?
 
@@ -405,6 +410,10 @@ The following versions have been published through the EAP
 * 2026.1.0TBLP.111
   * MOVE PARTITION now supporting non-empty partitions
   * Partitioned ANN index
+  * Various bugfixes and smaller enhancements
+    
+* 2026.1 Developer Preview (February 2026)
+  * Container images are easier to deploy
   * Various bugfixes and smaller enhancements
 
 ## How to get help?
