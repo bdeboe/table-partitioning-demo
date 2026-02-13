@@ -328,9 +328,9 @@ Once again, when we re-query our catalog table, we should once again see only th
 There is a bit more nuance to partition conversion than we demonstrated here. If you're trying out this feature, refer to [this question](#can-i-convert-my-existing-tables-to-use-partitioning) in the FAQ section. 
 
 
-### Auto-archiving older partitions
+### Auto-archiving older partitions - demo
 
-Earlier in this demo, we demonstrated how ALTER TABLE [...] MOVE PARITION could be used to move partitions to a specified database, such as an archive database. We can use this in conjunction with the [IRIS Task Manager](https://docs.intersystems.com/iris20253/csp/docbook/Doc.View.cls?KEY=GSA_manage_taskmgr) to auto-archive older partitions. At the top of this page, you'll find a class export (Test.Ben.TBLP.Task.Archive.cls) that demonstrates what that could look like. Let's start by once again recreating our demo.log table, but this one will hold a few years worth of entries.
+Earlier in this demo, we demonstrated how `ALTER TABLE ... MOVE PARITION` could be used to move partitions to a specified database, such as an archive database. We can use this in conjunction with the [IRIS Task Manager](https://docs.intersystems.com/iris20253/csp/docbook/Doc.View.cls?KEY=GSA_manage_taskmgr) to auto-archive older partitions. In the `src/cls` source code folder of this repository, you'll find a class `demo.task.Archive` that demonstrates what that could look like. Let's start by once again recreating our demo.log table, but this one will hold a few years worth of entries.
  
 ```SQL
 CREATE TABLE demo.logMultiYear (
@@ -348,10 +348,10 @@ CREATE DATABASE FILE "OneToTwoYears";
 CREATE DATABASE FILE "SixToTwelveMonths";
 ```
 
-Using VS Code or Studio, let's import that Archive Task class into our TESTTP1 namespace. In addition to the usual task methods, it includes a classmethod that can populate your table with years' worth of entries. From an IRIS Terminal, run the following command. It will populate entries in the table, starting from 1000 days in the past and going until 100 days into the future, adding one log entry per day.
+Using VS Code or using `$SYSTEM.OBJ.Load()` from the IRIS Terminal, import that Archive Task class into our TESTTP1 namespace. In addition to the usual task methods, it includes a classmethod that can populate your table with years' worth of entries. From an IRIS Terminal, run the following command. It will populate entries in the table, starting from 1000 days in the past and going until 100 days into the future, adding one log entry per day.
 
 ```csharp
-set tSC = ##class(Test.Ben.TBLP.Task.Archive).InsertLogEntriesDateRange("demo.logMultiYear",-1000,100)
+set tSC = ##class(demo.task.Archive).InsertLogEntriesDateRange("demo.logMultiYear",-1000,100)
 ```
  
 Check the demo.logMultiYear table and our handy catalog table. You should see the log entries, and you should see that the data is spread across dozens of partitions.
@@ -371,15 +371,16 @@ Now, let's set up that auto-archiving task:
 7) Set the task to run "Monthly (by day)", and have it run Every 1 month(s) on the First Sunday  
 8) Have it run once at the time 00:01:00  
 9) Click Finish  
+
 The auto-archiving task is now scheduled to run once per month, on the first Sunday of each month, at 1:00am.  
 I'm a bit impatient though, so let's run the task now and see what happens.  
 
-10) Go to Home > System Operation > Task Manager > Task Schedule  
-11) Click on the entry for ArchiveDemoLogPartitions  
-12) Click Run, then Performa Action Now, then Close  
-13) The task may take up to two minutes to start running, and it may take another 1-4 minutes to complete.  
-14) Refresh the page until you see that "Last Finished" is populate with a timestamp  
-15) Once again, check the demo.logMultiYear table and our handy catalog table. The catalog table should show that the older partitions now have a LOCATION that corresponds with the approprate older databases.  
+1)  Go to Home > System Operation > Task Manager > Task Schedule  
+2)  Click on the entry for ArchiveDemoLogPartitions  
+3)  Click Run, then Performa Action Now, then Close  
+4)  The task may take up to two minutes to start running, and it may take another 1-4 minutes to complete.  
+5)  Refresh the page until you see that "Last Finished" is populate with a timestamp  
+6)  Once again, check the demo.logMultiYear table and our handy catalog table. The catalog table should show that the older partitions now have a LOCATION that corresponds with the approprate older databases.  
 
 ```SQL
 SELECT TOP 1000 * FROM demo.logMultiYear;
