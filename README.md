@@ -387,6 +387,8 @@ SELECT TOP 1000 * FROM demo.logMultiYear;
 SELECT * FROM INFORMATION_SCHEMA.TABLE_PARTITIONS WHERE TABLE_NAME = 'logMultiYear';
 ```
 
+That's it! You've just set up an automatic archiving task that moves older partitions to cheaper storage. This is of course just a demonstration, and in your production deployment you may have specific constraints that differ from our TESTTP1 scenario, but as you'll appreciate from the `demo.task.Archive` class, the key work is all performed by `ALTER TABLE ... MOVE PARTITION` commands we're just constructing based on the goals and constraints of our use case.
+
 
 ### Cleaning up
 
