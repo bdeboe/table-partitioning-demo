@@ -5,7 +5,7 @@ This demo walks you through the new Table Partitioning feature in IRIS SQL, expl
 <!--
 :information_source: While an experimental version of the new capability was first made available with IRIS 2025.2, we recommend users download the more recent kits and containers made available through the [Early Access Program](https://www.intersystems.com/early-access-program/) to explore this new capability. For more about what's new in the current version, see [below](#version-history) 
 -->
-:information_source: While some Table Partitioning features were first made available with IRIS 2025.2, we recommend users download the more recent kits and containers made available through the [IRIS 2026.1 Developer Preview](https://community.intersystems.com/post/third-intersystems-iris-intersystems-iris-health-and-healthshare-health-connect-20261-developer) to explore this new capability. For more about what's new in the current version, see [below](#version-history) 
+:information_source: While some Table Partitioning features were first made available with IRIS 2025.2, we recommend users download the more recent kits and containers made available through the [IRIS 2026.1 Developer Preview](https://community.intersystems.com/post/third-intersystems-iris-intersystems-iris-health-and-healthshare-health-connect-2026-1) to explore this new capability. For more about what's new in the current version, see [below](#version-history) 
 
 
 ## What is Table Partitioning?
